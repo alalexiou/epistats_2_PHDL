@@ -1,0 +1,818 @@
+---
+title: '<span style=''font-size: 18px''>Public Health Data Lab II'
+author: "Alexandros Alexiou"
+date: "22 March 2023"
+output:
+  html_document: default
+  word_document: default
+subtitle: Trends in life expectancy and inequalities in England
+---
+
+```{css, echo = F}
+pre code, pre, code {
+  white-space: pre !important;
+  overflow-x: auto;
+  word-break: keep-all !important;
+  word-wrap: initial !important;
+}
+.boxBorder {
+     border: 2px solid #black;
+     padding: 5px;
+     outline: #696969 solid 1px;
+     outline-offset: 1px;
+   }
+```
+
+```{r setup, include=FALSE}
+options(width=1200)
+options(scipen = 4)
+options(max.print=100)
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+<br>
+
+#### Recent trends in Life Expectancy in England 
+
+While the average life expectancy in England has been increasing during the past decades, even before the pandemic the rate of improvement has slowed down considerably. There is a lot of debate as to why, with one of the causes mentioned being austerity.^1^ ^2^ ^3^ Another key issue that many studies have also focused on during the period since 2010, is whether inequalities or the gap between the least and most disadvantaged groups has increased.^3^ ^4^
+
+- In this study we will examine how life expectancy (LE) at birth in England has evolved in recent years. 
+- We will also focus on the geographical inequalities of LE across local authorities. In particular, we will focus on LE inequalities that are associated with deprivation and income level. 
+- We will then carry out a cross-sectional analysis on the relationships between life expectancy at birth and income at the Local Authority (LA) level, using a simple regression model.
+
+<br>
+
+#### Outline of the practical
+
+This practical session demonstrates a step-by-step analysis on life expectancy and inequalities in England. It covers some key aspects of such studies, from getting the necessary data to building a simple model exploring the relationships between life expectancy and the social determinants of health. We will use aggregated data at Local Authority level to perform the analysis (known as an ecological study). 
+
+In general, this practical should run smoothly; everything should be contained within the script, including downloading data. Furthermore, we have included several "optional" tasks about the analysis that you can do. 
+
+This practical is trying to keep to Base R as much as possible (i.e. without using third-party libraries), with some exceptions. It also assume you run this within RStudio (tested for Version 1.1.453 and R version 3.6.1), which is free and you can find [here](https://rstudio.com/products/rstudio/download/). 
+
+By the end of the practical, you should be able to: <br>
+-- Read data into R.<br>
+-- Identify data structures.<br>
+-- Subset, clean and re-code data.<br>
+-- Find missing values and outliers.<br>
+-- Join data tables based on common variables.<br>
+-- Summarise and plot data.<br>
+-- Calculate variable relationships.<br>
+-- Calculate linear regression models.
+
+There are also some sections included in a text-box; these are generally optional, but they do contain additional information, exercises, or remind you some things from previous practicals.
+
+<br>
+
+#### Getting life expectancy data
+
+Most of the relevant data are accessible through the Public Health England (PHE) "Fingertips" repository or through the Office for National Statistics (ONS). The code should download the relevant data automatically in your working directory folder.
+
+We can start by loading the necessary libraries - you can to install these from the "Tools" menu first if you haven't done so already. Alternatively try using these commands: 
+
+```{r results='hide', message=FALSE, warning=FALSE,  eval=FALSE}
+# Install libraries
+install.packages("readxl")
+install.packages("ggplot2")
+```
+
+For `fingertipsR`, if the library is not available on CRAN, try following the instructions on [Github](https://github.com/ropensci/fingertipsR):
+
+```{r results='hide', message=FALSE, warning=FALSE,  eval=FALSE}
+# Enable repository from ropensci
+options(repos = c(
+  ropensci = 'https://ropensci.r-universe.dev',
+  CRAN = 'https://cloud.r-project.org'))
+
+# Download and install fingertipsR in R
+install.packages('fingertipsR')
+```
+
+
+```{r results='hide', message=FALSE, warning=FALSE}
+# Load necessary libraries
+library(ggplot2)
+library(readxl)
+library(fingertipsR)
+
+```
+
+<br>
+
+<div class="boxBorder">
+
+We will download LE at birth data directly from PHE using the `fingertipsR` library. If you are wondering how to find the necessary fingertips codes for what you want these two commands will help you (optional):
+
+```{r, echo=T, eval=FALSE}
+# Available Indicators
+ind_codes <- indicators()
+
+# Available Area Types
+area_types()
+```
+
+An easy way of "eyeballing" the data within RStudio is by viewing the file using either `View(ind_codes)` or clicking the file from your environment tab. When the table opens, click `filter` button at the top left, and within the textbox that appears above each column, type "life expectancy" for column *IndicatorName* in order to search for it. _Indicator code_ 90366 indicates the LE at birth for all persons and an _AreaTypeID_ of 101 returns data at the Lower Tier LA level (Districts and UAs).
+
+</div>
+
+<br>
+
+Now we can load the data into R:
+
+```{r}
+# Get data
+le0 <- fingertips_data(IndicatorID = 90366, AreaTypeID = 101)
+# View top of data
+head(le0)
+# Structure
+str(le0)
+```
+
+Without going into much detail, the `str()` function is very helpful when you are performing any calculations and load data into R through text files, excels etc., as many times R will read some values wrong.  This is particularly true when handing numerical data; for instance, missing values and decimal types might need your attention, and it is best if you caught these "errors" early on.
+
+Notice the structure of the data; these are generally called **panel data**, i.e. data with observations across a number of time periods. There are generally two ways with which these are supplied, either in _long_ or _wide_ format. Wide format is when each column represents a time period, while long is when each line represents a time period. 
+
+Q: With regards to the format, what kind of panel data is the life expectancy table?
+<details><summary>Answer:</summary>
+It's in long format.
+</details>
+
+Depending on what you want to accomplish, you might want to transform between the two, which is not particularly easy. Fortunately we don't need to do this now, but in case you are wondering, take a look at the `reshape()` function.
+
+<br>
+
+Now let's try to make a simple plot regarding national trends in England. First, we will look at the table in more detail, as we may need to subset the data. The `table()` function is a good way to get all the unique values in a column.  
+
+```{r}
+# Types of areas
+table(le0$AreaType)
+# How time period is coded
+table(le0$Timeperiod)
+table(le0$Timeperiodrange)
+# How sex is coded
+table(le0$Sex)
+# How age is coded
+table(le0$Age)
+
+```
+LE data are supplied as 3-year rolling averages, except 2021. We can easily subset just the 3-year averages using the column `Timeperiodrange == "3y`. We would also want the time period to be a number, and not in the format '2001 - 03'. For now on, let's use the middle year as a numeric value for the reference year. We use the `substr()` function, which returns a part of a character string. The arguments start and stop are used to specify which part to extract, i.e. from start to stop. If the string was "hello", then it would return the first and second characters (try `substr("hello", start = 1, stop = 2)`).
+
+
+
+```{r}
+# Keep only 3-year estimates
+# For this, the Time period range should be = "3y"
+le0 <-le0[le0$Timeperiodrange == "3y",]
+
+# We make a new column, Year by extracting the first 4 characters
+le0$Year <- substr(le0$Timeperiod, start = 1, stop = 4)
+
+# From character to numeric
+le0$Year <- as.numeric(le0$Year)
+
+# add 1 for middle year
+le0$Year <- le0$Year + 1
+
+```
+
+The column with the life expectancy at birth values is stored in the column `Value`. Ideally, we would want to rename it to something recognisable. 
+
+```{r}
+# Change column names by making a copy to a new one and deleting the original
+# We can also use names(le0)[13] <- "LE_Birth" (i.e. change the 7th column name)
+le0$LE_Birth <- le0$Value
+le0$Value <- NULL 
+
+```
+
+
+Finally, the data are supplied for multiple levels, so besides LA level, national and regional data are also supplied. For this example we will subset the rows of the table that regard males and country-level averages (i.e. England) only.
+
+```{r}
+# England data only - new object as 'le0_eng'
+le0_eng <- le0[le0$AreaType == "England", ]
+
+# Males only  - new object as 'le0_eng_male'
+le0_eng_male <- le0_eng[le0_eng$Sex == "Male", ]
+
+```
+
+<br>
+
+We can now plot the values:
+
+```{r, fig.height=4, fig.width=6, fig.align="center"}
+# Simple plot
+plot(le0_eng_male$Year, le0_eng_male$LE_Birth)
+```
+
+Q: Can you make a similar plot for female life expectancy?
+<details><summary>Answer:</summary>
+```{r, echo = T, eval=F, }
+le0_eng_female <- le0_eng[le0_eng$Sex == "Female", ]
+plot(le0_eng_female$Year, le0_eng_female$LE_Birth)
+```
+</details>
+
+<br>
+
+<div class="boxBorder">
+
+#### Plotting with `ggplot2`: Basic Plots
+
+<details><summary>Click to open section:</summary>
+
+It would be nice if we could overlay trends in both male and female LE at birth have to create another data frame with females plot it, This is rather ugly in base R - as you probably have noticed - so from now on we will use the `ggplot2` library to visualize data. `ggplot2` has its own grammar, so it might be confusing at first. However, it is easy once you get used to; the best way to get started is to look online for examples, including [this cheetsheet](https://github.com/rstudio/cheatsheets/blob/master/data-visualization-2.1.pdf).
+
+Let's start with a simple plot:
+```{r, fig.height=3, fig.width=5, fig.align="center"}
+ggplot(data = le0_eng_male, aes(x = Year, y = LE_Birth)) + 
+  geom_point()
+```
+
+The premise is very simple; you tell R to create a plot using the `data = le0_eng_male`. Then you add the _aesthetics_, essentially telling it how to plot the data you just supplied. We specify the *Year* on the x-axis and *LE_Birth* on the y-axis. However, we are not telling it how to represent them; if we want them as points, we add a geometry with `geom_point()`. If we wanted lines, we would add `geom_line()`. If we wanted both, we could add both.
+
+We can add another argument in the aesthetics, `group = Sex` with which we specify to group observations by sex. We can also add some labels with `labs`. The rest are done automatically:
+
+```{r, fig.height=3, fig.width=5, fig.align="center"}
+ggplot(le0_eng, aes(x = Year, y = LE_Birth, group = Sex)) + 
+  geom_point() + 
+  geom_line(aes(color = Sex)) +
+  labs(y = "Life Expectancy at Birth", 
+       x = "Year", 
+       title = "Trends in Life Expectancy at birth between 2001 and 2020 in England")
+```
+
+Since we could like to colour every line differently we can specify `geom_line(aes(color = Sex))` to do that. R will pick two colours automatically. 
+
+Q: The points above are all the default black colour. What do we need to change to make them the same colour as the lines?
+<details><summary>Answer:</summary>
+Replace with `geom_point(aes(color = Sex))`.
+</details>
+
+</details>
+
+</div>
+
+<br>
+
+#### Inequalities at Local Authority level
+
+For the next part we will try to explore the LE of local authorities by deprivation. Since the current table contains more than the LA-level data that we need, we will try to remove these. Generally we try to clean datasets from unnecessary data, so we have a nice table that we can use easily in our analysis.
+
+```{r}
+# Subset and Clean
+le0 <- le0[le0$AreaType == "Districts & UAs (pre Apr 2019)", ]
+le0 <- le0[, c("Year", "ParentCode", "ParentName", "AreaCode", "AreaName", # geography and time
+               "Sex", "Age",                                               # type
+               "LE_Birth", "LowerCI95.0limit", "UpperCI95.0limit")]        # values
+
+```
+
+We will only keep the District and Unitary Authorities (Lower Tier LAs). Notice the measure we are using is LE for all persons at birth, so the *Age* column doesn't really give any useful information.
+
+```{r}
+# No useful information about age
+table(le0$Age)
+# Delete
+le0$Age <- NULL
+```
+
+It is particularly important to look for any irregularities in the data, like missing values. Thankfully we didn't have to deal with any issues up till now. The `summary()` function can be very useful for this.
+
+```{r}
+# Look for irregularities
+summary(le0)
+```
+
+The most important information here is the missing values in the LE *LE_Birth* column. This could potentially be problematic. We have to investigate.
+
+```{r}
+# Which are these?
+le0[is.na(le0$LE_Birth) == TRUE, ]
+```
+
+We do not have data for the two LAs, The Isles of Scilly and the City of London. We can remove them now.
+
+```{r}
+# Remove them
+le0 <- le0[is.na(le0$LE_Birth) == F, ]
+# So how many LAs are left?
+length(unique(le0$AreaCode))
+```
+
+It is very common to exclude those two LAs. The Isles of Scilly and the City of London are very small in terms of population, and usually ONS doesn't publish any data for them. While there were 326 LAs as of 2018, we are missing data on two LAs, so the total is 324.
+
+Now lets try to plot these LE data by deprivation. We will use the 2015 Index of Multiple Deprivation (IMD) and construct quintiles based on the average LSOA deprivation rank. We will have to get these data and join them to our LE table. We use the `{readxl}` library to read excel files directly into R. It is very fast, but note that it reads data into a *tibble* format, which is a format you might not be familiar with (but does not really matter in this case).
+
+```{r}
+# Download data
+imd_link <- "https://assets.publishing.service.gov.uk/government/uploads/system/uploads/attachment_data/file/467764/File_1_ID_2015_Index_of_Multiple_Deprivation.xlsx"
+download.file(imd_link, "imd.xlsx", method = "curl") # this is downloaded to your working directory
+imd <- read_xlsx("imd.xlsx", sheet = 2, col_names = T)
+head(imd)
+```
+
+In order to calculate the average rank per LA, we use `aggregate()` with `FUN = "mean"`.
+
+```{r}
+# Rename columns
+names(imd) <- c("LSOA_code", "LSOA_name", "LA_code", "LA_name", "IMD_rank", "IMD_decile")
+imd <- aggregate(IMD_rank ~ LA_code + LA_name, data = imd, FUN = "mean")
+```
+
+We can now join the IMD data to the LE data using `merge()`. For simplicity, we assume here that the 2015 IMD ranks remain stable over the period of analysis. Another potential issue with the IMD is that, being a composite measure of deprivation, it already contains measures of mortality; and as such it wouldn't be best to use in conjunction with life expectancy. A better measure would be to use just one domain of deprivation, such as income, to perform the analysis. For simplicity however, we will just use the general deprivation rank for the classification.
+
+```{r}
+# Join data
+le0 <- merge(x = le0, y = imd, by.x = "AreaCode", by.y = "LA_code", all.x = T)
+```
+
+<br>
+
+<div class="boxBorder">
+
+Note the `all.x` argument is the very important; an `all.x = T` represents a left join, i.e. we keep all data from the x object (_le0_), and discard those from y (_imd_) that don't match - in this case, the IMD data for Wales, Scotland etc. An `all.y = T` would keep all the _imd_ data (right join). An `all = T` represents a full join, and an `all = F` an inner join. check the `merge()` help page for more information. 
+
+</div>
+ 
+<br>
+
+
+Next, we will make the 5 quintiles based on the average rank. We use a combination of `quantile()` and `findInterval()` to find where the cuts should be and which LA belongs to which interval respectively.
+
+```{r}
+# Helper variable
+imd_Q5 <- quantile(le0$IMD_rank, probs=c(0.2, 0.4, 0.6, 0.8))
+# Cut the variable into 5 equal pieces
+le0$IMD_Quintile <- findInterval(le0$IMD_rank, c(0, imd_Q5, Inf))
+# Rename using factors; it is a type of variable, like numeric, string, etc.
+le0$IMD_Quintile <- factor(le0$IMD_Quintile, labels=c("Q1 most deprived","Q2","Q3", "Q4","Q5 least deprived"))
+# Preview
+head(le0)
+# Delete variable that we don't need any more
+remove(imd_Q5)
+```
+
+Now we can make a new data frame with the aggregate average LE values per IMD quintile. Essentially, we are telling to R to find the averages of `LE_Birth` by `Year`, `IMD_Quintile` and `Sex`. Translate *by* with `~` and you should get an idea of how to write formulas in R now. 
+
+```{r}
+# Calcalute averages by IMD Quintile
+le0_imd <- aggregate(LE_Birth ~ Year + IMD_Quintile + Sex, data = le0, FUN = "mean")
+head(le0_imd)
+```
+
+<br>
+
+<div class="boxBorder">
+
+#### Plotting with `ggplot2`: Advanced plots
+
+<details><summary>Click to open section:</summary>
+
+Let's try to plot some results using `ggplot()` again. We can make a plot for male life expectancy by IMD Quintile, as we did above for LE by sex:
+
+```{r, echo = T, eval=T, fig.height=5, fig.width=12, fig.align="center"}
+le0_imd_male <- le0_imd[le0_imd$Sex == "Male", ]
+
+ggplot(le0_imd_male, aes(x = Year, y = LE_Birth, group = IMD_Quintile)) + 
+  geom_point(aes(color = IMD_Quintile)) + 
+  geom_line(aes(color = IMD_Quintile)) +
+  labs(y = "Male Life Expectancy at Birth", 
+       x = "Year", 
+       color = "Deprivation Quintile",
+       caption = "Based on the 2015 IMD average rank",
+       title = "Trends in Male Life Expectancy at birth between 2001 and 2020 in England")
+```
+
+Now, we will try to plot LEs by deprivation *and* sex Optimally, we would want to somehow compare LEs for both males and females easily in a graph. 
+
+We will try something a little more advanced at this point. Since we have mean values for both males and females stored in the variable _Sex_, we can add `facet_grid(cols = vars(Sex))` to create one plot for each sex. We specify how many plot by adding `cols` i.e. separate plots as columns (it could also be rows), and use the variable `Sex` to do the separation by (in this case, male and female). Remember, you can always search online to find out code examples!
+
+```{r, fig.height=5, fig.width=12, fig.align="center"}
+# Plot by IMD Quintile
+ggplot(le0_imd, aes(x = Year, y = LE_Birth, group = IMD_Quintile)) + 
+  geom_point(aes(color = IMD_Quintile)) + 
+  geom_line(aes(color = IMD_Quintile)) +
+  facet_grid(cols = vars(Sex)) + 
+  labs(y = "Life Expectancy at Birth", 
+       x= "Year",
+       color = "Deprivation Quintile",
+       caption = "Based on the 2015 IMD average rank",
+       title = "Trends in Life Expectancy at birth between 2001 and 2020 in England")
+```
+</details>
+
+</div>
+ 
+<br>
+
+#### Modelling the relationships between LE and Income
+
+The second part of this analysis is to make a simple regression model looking at the relationship between LE and average income. We won't be using panel data in this instance; we will try to build this model just for the 2016 data, as an example. Let's begin by subsetting the LE table:
+
+```{r}
+# LA - level data for the year 2016
+# Subset 
+le0_16 <- le0[le0$Year == "2016", ]
+```
+
+We now need to attach the income data to the *le0_16* table. For this example we will use the Gross Disposable Household Income (GDHI) estimates per Local Authority. We also need to specify the sheet number (2), how many lines to skip at the beginning (2), and how many lines total to read (392).
+
+```{r}
+# Income
+gdhi_link <- "https://www.ons.gov.uk/file?uri=%2feconomy%2fregionalaccounts%2fgrossdisposablehouseholdincome%2fdatasets%2fregionalgrossdisposablehouseholdincomegdhibylocalauthorityintheuk%2f1997to2016/vcregionalgdhibylareordered.xlsx"
+download.file(gdhi_link, "gdhi.xlsx", method = "curl") 
+# Read Excel
+gdhi <- read_xlsx("gdhi.xlsx", sheet = 2, skip = 2, n_max = 392, col_names = T)
+```
+
+Income figures are not per person, but rather as totals in £ millions. Thankfully, the next sheet (no. 3) in the excel file has the total population estimates per LA. 
+
+```{r}
+# Read Excel
+pop <- read_xlsx("gdhi.xlsx", sheet = 3, skip = 2, n_max = 392, col_names = T)
+```
+
+We can now calculate values per person for 2016:
+
+```{r}
+# Subset year 2016
+gdhi <- gdhi[, c("LAU1 code", "LA name", "2016")]
+pop <- pop[, c("LAU1 code", "LA name", "2016")]
+
+# Rename
+gdhi$GDHI_2016 <- gdhi$`2016` 
+gdhi$`2016` <- NULL
+pop$Pop_2016 <- pop$`2016` 
+pop$`2016` <- NULL
+
+# Merge 
+gdhi <- merge(gdhi, pop, by = c("LAU1 code", "LA name"), all = T)
+gdhi$GDHI_2016_PP <- gdhi$GDHI_2016 / gdhi$Pop_2016
+gdhi$GDHI_2016_PP <- round(gdhi$GDHI_2016_PP*1000, 3) # in £ thousands
+```
+
+```{r}
+# Descriptives
+summary(gdhi$GDHI_2016_PP)
+```
+
+<br>
+
+<div class="boxBorder">
+
+#### Plotting with `ggplot2`: Histograms
+
+<details><summary>Click to open section:</summary>
+For more information we can look at the distribution of the income data. We will use the histogram geometry of `ggplot()`, which is essentially adding `geom_histogram()` to the core plot:
+
+```{r, fig.height=3, fig.width=5, fig.align="center"}
+# Distribution
+# The geom_histogram makes a histogram from the data
+ggplot(data = gdhi, aes(x = GDHI_2016_PP)) + 
+  geom_histogram(bins = 50, fill="steelblue", color = "white")
+```
+</details>
+
+</div>
+ 
+<br>
+
+Notice are some outliers in the data values, possibly in London, which might become a problem later in the analysis. For now though we can proceed and join our GDHI data to our LE data:
+
+```{r}
+# Merge with LE
+le0_16 <- merge(le0_16, gdhi, by.x = "AreaCode", by.y = "LAU1 code", all.x = T)
+# Check for irregularities again
+summary(le0_16)
+```
+
+We will perform the analysis separately for males and females, and so we will create two separate files:
+
+```{r}
+# Split
+le0_m <- le0_16[le0_16$Sex == "Male", ]
+le0_f <- le0_16[le0_16$Sex == "Female", ]
+```
+
+<br>
+
+<div class="boxBorder">
+
+#### Correlations
+
+<details><summary>Click to open section:</summary>
+
+A first step in any analysis is to look for any correlations between the two variables. Correlation gives us an idea on the level of association between two variables. This is easily carried out with the `cor()` function. By default, this gives us the Pearson's correlation. The `cor.test()` is essentially the same, but it gives a little bit more information than just the correlation value.
+
+```{r}
+# Correlations
+cor(le0_m$LE_Birth, le0_m$GDHI_2016_PP)
+```
+```{r}
+cor.test(le0_f$LE_Birth, le0_f$GDHI_2016_PP)
+```
+
+It seems there is a high correlation between LE and GDHI. Plotting the data might also be useful in visualising this relationship, particularly spotting any possible outliers:
+
+```{r, fig.height=3, fig.width=5, fig.align="center"}
+# Plot
+le_f_plot <- ggplot(data = le0_f, aes(LE_Birth, GDHI_2016_PP)) + geom_point(col = "orchid") 
+le_f_plot
+```
+
+Notice this time we saved the plot in an object, `le_f_plot`, which we can call whenever we want. The best part of this is that now we can add more details to it, like `labs()` using the `+`. 
+
+Q: Can you make the same plot for males and add axis labels and a title? Try to make it with a different colour for points.
+<details><summary>Answer:</summary>
+```{r, echo = T, eval=FALSE}
+le_m_plot <- ggplot(le0_m, aes(LE_Birth, GDHI_2016_PP)) + geom_point(col = "blue") 
+le_m_plot + labs(x = "Life Expectancy at Birth (years)", 
+                 y = "Gross Disposable Household Income per person (£1000s)",
+                 title = "Relationship between male life expectancy and income by LA, 2016 data")
+```
+</details>
+
+</details>
+
+</div>
+ 
+<br>
+
+#### Regression Models
+
+We know there is a significant positive correlation between LE and average GDHI, however a regression model will quantify that relationship into something more meaningful and easy to interpret. We will now calculate a simple linear regression model. In brief, we will calculate the statistical importance of the relationship (the p-value), how much is the effect (the coefficient), and how much LE variability can be explained by income figures (the R^2^). We will make two models, one for male and one for female life expectancy.
+
+```{r}
+# Model for males
+le_model_m <- lm(LE_Birth ~ GDHI_2016_PP, data = le0_m)
+summary(le_model_m)
+```
+
+```{r}
+# Model for females
+le_model_f <- lm(LE_Birth ~ GDHI_2016_PP, data = le0_f)
+summary(le_model_f)
+```
+
+Q: According to these two models, which sex is expected to have higher gains of life expectancy at birth when GDHI increases?
+<details><summary>Answer:</summary>
+Males. An increase of 1 in GDHI (i.e., £1,000) is associated with an increase in life expectancy by 0.17 years.  Females have a slightly smaller coefficient with 0.16 years.
+</details>
+
+#### Basic Regression Plots
+
+By plotting a regression model in R we can get some useful information about how "good" our model is, such as heteroskedasticity of residuals, outliers etc. In this instance we will only focus on outliers, and we will only focus on the male life expectancy model. 
+
+We can plot a model really easily by using the `plot()` command. We can press `enter` to scroll through the plots.
+
+```{r, echo=T, eval=F}
+# Plots
+plot(le_model_m)
+```
+<br>
+Let's focus on plot no. 5:
+
+```{r, echo=F, fig.height=4, fig.width=6, fig.align="center"}
+# Plots
+plot(le_model_m, 5)
+```
+
+Based on the above plot, there seems to be an issue with GDHI *outlier* values. We have also spotted those earlier in the density plot - around 5-6 of them. In this case we will try to remove those LAs with very high GDHI (but note there are better ways to deal with outlier values as well, including specific techniques). For this study we will do so manually; we order the dataset by GDHI value and remove the top 6 LAs. 
+
+```{r}
+# Remove top 6 outliers
+le0_m <- le0_m[order(le0_m$GDHI_2016_PP, decreasing = T), ]
+head(le0_m)
+le0_m <- le0_m[-c(1:6), ]
+```
+
+Then we re-run our model using the new dataset without the outliers:
+
+```{r}
+# Models
+le_model_m <- lm(LE_Birth ~ GDHI_2016_PP, data = le0_m)
+summary(le_model_m)
+```
+
+Notice now how the expected relationship is much higher, i.e. 0.29 years for every £1,000, and how the overall variability explained is also higher _(R^2^ = 0.45)_.
+
+<br>
+
+<div class="boxBorder">
+
+#### Visualising the regression line
+
+<details><summary>Click to open section:</summary>
+We can visualise the linear model again using `ggplot2`, very easily by adding the `geom_smooth()` and a `method = "lm"` parameter (as it's a linear model), as follows:
+
+```{r, fig.height=4, fig.width=6, fig.align="center"}
+ggplot(le0_m, aes(LE_Birth, GDHI_2016_PP)) + 
+  geom_point(col = "skyblue") + 
+  geom_smooth(method = "lm")
+
+```
+
+Q: In the above plot, can you guess what the gray shaded area along the regression line represents?
+<details><summary>Answer:</summary>
+It represents the confidence interval of the regression line; in this case that is 95%. Or, in other words, it means that we're 95% confident that the true regression line lies somewhere in that gray zone. By default, the confidence graphic in `geom_smooth()` is always true and set to 0.95. These parameters are controlled by the `se` and `level` arguments, like so: `geom_smooth(method = "lm", se = TRUE, level = 0.95)`.
+</details>
+
+</details>
+
+</div>
+ 
+<br>
+
+#### Adding confounders
+
+One issue with how life expectancy is calculated is that it assumes the mortality for people born now, using mortality patterns of all ages based on individuals that were born in the past (i.e. current mortality patterns). However, mortality rates of e.g. people at 65 years of age now will probably not be same for people born now in 65 years. For example, there are reasons to believe that mortality rates of older people are much higher as an effect of the smoking epidemics in the 1970's and 1980's.
+
+In this study, we will try to control for the age distribution of LAs and their association to life expectancies. For simplicity, in this example we will just include the proportion of the population over 65 years of age for each LA. We will do that as an example, although whether that parameter should be included in the model is debatable.
+
+Firstly, let’s get the available population estimates by age group. The excel files has three sheets, the first includes notes, the second estimates for males and the third estimates for females. As aforementioned, we will only work with the male life expectancy model from now on.
+
+```{r}
+# Data
+pop16_link <- "https://www.ons.gov.uk/file?uri=%2fpeoplepopulationandcommunity%2fpopulationandmigration%2fpopulationprojections%2fdatasets%2flocalauthoritiesinenglandtable2%2f2016based/table2.xls"
+download.file(pop16_link, "pop_16.xls", method = "curl")
+
+pop16_m <- read_xls("pop_16.xls", sheet = 2, skip = 6, n_max = 7387, col_names = T)
+
+# Preview
+head(pop16_m)
+```
+
+We will now have to construct a variable adding all age groups of 65 years and over.
+
+```{r}
+# All age groups of 65 years and over
+target_groups <- c("65-69", "70-74", "75-79", "80-84", "85-89", "90+")
+
+# Use the %in% to subset those that match our target age groups
+pop16_m_65 <- pop16_m[pop16_m$`AGE GROUP` %in% target_groups, ]
+
+# Subset columns
+pop16_m_65 <- pop16_m_65[, c("CODE",  "AREA",  "AGE GROUP", "2016")]
+
+# Aggregate using FUN = "sum"
+pop16_m_65 <- aggregate(`2016` ~ CODE + AREA, data = pop16_m_65, FUN = "sum")
+```
+
+We also need the total amount the obtain the ratio:
+
+```{r}
+# subset the total only
+pop16_m_total <- pop16_m[pop16_m$`AGE GROUP` == "All ages", ]
+
+# Subset columns
+pop16_m_total <- pop16_m_total[, c("CODE",  "AREA",  "AGE GROUP", "2016")]
+
+# Rename and clean table
+pop16_m_total$Pop_Male <- pop16_m_total$`2016`
+pop16_m_total$`AGE GROUP` <- NULL
+pop16_m_total$`2016` <- NULL
+```
+
+Merging the file will gives us two columns, the population over 65 years and the total population. Dividing the two columns will give us the proportion of people of 65 years of age and over to the total LA population, according to 2016 estimates.
+
+```{r}
+# Join
+pop16_m_65 <- merge(pop16_m_65, pop16_m_total, by = c("CODE", "AREA"), all.x = T)
+
+# Calculate proportion
+pop16_m_65$Pop_M65_ratio <- pop16_m_65$`2016` / pop16_m_65$Pop_Male
+
+# Subset columns
+pop16_m_65 <- pop16_m_65[, c("CODE", "Pop_M65_ratio")]
+
+# Preview
+head(pop16_m_65)
+
+# Check values
+summary(pop16_m_65$Pop_M65_ratio)
+```
+
+The `pop16_m_65` table contains the information we need to add to the LE table. we can again use the LA ONS code to join the two tables:
+
+```{r}
+# Join to male LE table
+le0_m <- merge(le0_m, pop16_m_65, by.x = "AreaCode", by.y = "CODE", all.x = T)
+```
+
+We now have a multiple linear regression model, using two explanatory variables, *GDHI_2016_PP* and *Pop_M65_ratio*. In multiple regression, it is important to look out for _Multicollinearity_.  Multicollinearity refers to a situation in which two or more explanatory variables in a multiple regression model are highly correlated, which can be problematic. We can check the level of correlation here:
+
+```{r}
+# Correlation
+cor(le0_m$GDHI_2016_PP, le0_m$Pop_M65_ratio)
+```
+
+Which shows that our two variables are not very highly (linearly) correlated. In this case the correlation value can be considered sufficient evidence.
+
+We can now add the population over 65 ratio as a confounder to our model specification. In R, the way to do that is to add variable using the `+` character on the right side of the formula. 
+
+```{r}
+# New model
+le_ext_model_m <- lm(LE_Birth ~ GDHI_2016_PP + Pop_M65_ratio, data = le0_m)
+summary(le_ext_model_m)
+```
+
+While relatively basic, the above model shows that when controlling for the proportion of population of 65 years age and over, the expected effect of gross disposable income is 0.32 years increase for an increase in annual gross disposable income of £1,000. Both our explanatory variables are highly significant. 
+
+Take a moment to reflect on the model outcomes: <br>
+-- How can these results inform policy? <br>
+-- Does this model tell us anything about trends in LE? <br>
+-- What does it mean for inequalities? <br>
+-- What other confounding variables could be included in the model? For instance, other demographics? What about access to healthcare? Also, is there any way we can check whether these associations are varying by area deprivation? <br>
+
+<br>
+
+<div class="boxBorder">
+
+##### R coding Exercise: 
+
+<br>
+-- As we did above for Male LE, try to carry out the same analysis and construct a similar model using female life expectancies. <br>
+
+<details><summary>Answer:</summary>
+```{r}
+# Read data
+pop16_f <- read_xls("pop_16.xls", sheet = 3, skip = 6, n_max = 7387, col_names = T)
+
+# Preview
+head(pop16_f)
+
+# All age groups of 65 years and over
+target_groups <- c("65-69", "70-74", "75-79", "80-84", "85-89", "90+")
+
+# Use the %in% to subset those that match our target age groups
+pop16_f_65 <- pop16_f[pop16_f$`AGE GROUP` %in% target_groups, ]
+
+# Subset columns
+pop16_f_65 <- pop16_f_65[, c("CODE",  "AREA",  "AGE GROUP", "2016")]
+
+# Aggregate using FUN = "sum"
+pop16_f_65 <- aggregate(`2016` ~ CODE + AREA, data = pop16_f_65, FUN = "sum")
+
+# subset the total only
+pop16_f_total <- pop16_f[pop16_f$`AGE GROUP` == "All ages", ]
+
+# Subset columns
+pop16_f_total <- pop16_f_total[, c("CODE",  "AREA",  "AGE GROUP", "2016")]
+
+# Rename and clean table
+pop16_f_total$Pop_Female <- pop16_f_total$`2016`
+pop16_f_total$`AGE GROUP` <- NULL
+pop16_f_total$`2016` <- NULL
+
+# Join
+pop16_f_65 <- merge(pop16_f_65, pop16_f_total, by = c("CODE", "AREA"), all.x = T)
+
+# Calculate proportion
+pop16_f_65$Pop_F65_ratio <- pop16_f_65$`2016` / pop16_f_65$Pop_Female
+
+# Subset columns
+pop16_f_65 <- pop16_f_65[, c("CODE", "Pop_F65_ratio")]
+
+# Preview
+head(pop16_f_65)
+
+# Check values
+summary(pop16_f_65$Pop_F65_ratio)
+
+# Remove outliers and join ratios to female LE table
+le0_f <- le0_f[order(le0_f$GDHI_2016_PP, decreasing = T), ]
+le0_f <- le0_f[-c(1:6), ]
+le0_f <- merge(le0_f, pop16_f_65, by.x = "AreaCode", by.y = "CODE", all.x = T)
+
+# Correlation
+cor(le0_f$GDHI_2016_PP, le0_f$Pop_F65_ratio)
+
+# New model
+le_ext_model_f <- lm(LE_Birth ~ GDHI_2016_PP + Pop_F65_ratio, data = le0_f)
+summary(le_ext_model_f)
+```
+</details>
+
+</details>
+
+</div>
+
+
+<br>
+<br>
+
+#### References
+
+1. [Hiam L, Harrison D, McKee M, et al. Why is life expectancy in England and Wales ‘stalling’? J Epidemiol Community Health 2018;72:404-408](https://jech.bmj.com/content/72/5/404).
+
+2. [Leon DA, Jdanov DA, Shkolnikov VM. Trends in life expectancy and age-specific mortality in England and Wales, 1970–2016, in comparison with a set of 22 high-income countries: an analysis of vital statistics data. Lancet Public Health, 2019;4:575-582](https://doi.org/10.1016/S2468-2667(19)30177-X).
+
+3. [Alexiou A, Fahy K, Mason K, et al. Local government funding and life expectancy in England: a longitudinal ecological study. The Lancet Public Health 2021:6(9), e641-e647](https://www.thelancet.com/journals/lanpub/article/PIIS2468-2667(21)00110-9/fulltext).
+
+4. [Barr B, Higgerson J, Whitehead M. Investigating the impact of the English health inequalities strategy: time trend analysis. BMJ 2017; 358:j3310](https://www.bmj.com/content/358/bmj.j3310).
+
+
+
+<br>
